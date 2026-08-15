@@ -1,0 +1,757 @@
+openapi: 3.0.3
+info:
+  title: Medicamentos App API
+  version: 1.0.0
+  description: |
+    API HTTP v1 para controle de medicamentos, agendas, doses, dispositivos
+    push, alertas de compra e whitelist. Autenticação Google OIDC (Bearer).
+servers:
+  - url: /api/v1
+    description: API versionada
+tags:
+  - name: auth
+  - name: medications
+  - name: schedules
+  - name: doses
+  - name: devices
+  - name: alerts
+  - name: admin
+  - name: me
+paths:
+  /me:
+    get:
+      tags: [me]
+      summary: Perfil do usuário autenticado
+      operationId: getMe
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Perfil
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /medications:
+    get:
+      tags: [medications]
+      summary: Listar catálogo do usuário
+      operationId: listMedications
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Lista
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Medication'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [medications]
+      summary: Criar medicamento no catálogo
+      operationId: createMedication
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MedicationCreate'
+      responses:
+        '201':
+          description: Criado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Medication'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /medications/{medicationId}:
+    parameters:
+      - $ref: '#/components/parameters/medicationId'
+    get:
+      tags: [medications]
+      summary: Obter medicamento
+      operationId: getMedication
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Medication'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [medications]
+      summary: Atualizar medicamento / estoque / limiar
+      operationId: updateMedication
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MedicationUpdate'
+      responses:
+        '200':
+          description: Atualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Medication'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /schedules:
+    get:
+      tags: [schedules]
+      summary: Listar agendas do usuário
+      operationId: listSchedules
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: medicationId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/ScheduleStatus'
+      responses:
+        '200':
+          description: Lista
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Schedule'
+    post:
+      tags: [schedules]
+      summary: Criar agenda (reutiliza medicamento do catálogo)
+      operationId: createSchedule
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScheduleCreate'
+      responses:
+        '201':
+          description: Criada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Schedule'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /schedules/{scheduleId}:
+    parameters:
+      - $ref: '#/components/parameters/scheduleId'
+    get:
+      tags: [schedules]
+      summary: Obter agenda
+      operationId: getSchedule
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Schedule'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [schedules]
+      summary: Atualizar agenda ou transição de status
+      operationId: updateSchedule
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScheduleUpdate'
+      responses:
+        '200':
+          description: Atualizada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Schedule'
+
+  /doses:
+    get:
+      tags: [doses]
+      summary: Listar ocorrências (acompanhamento / pendentes)
+      operationId: listDoses
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: medicationId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/DoseStatus'
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Lista
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Dose'
+
+  /doses/{doseId}/take:
+    post:
+      tags: [doses]
+      summary: Registrar dose como tomada
+      operationId: takeDose
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/doseId'
+      responses:
+        '200':
+          description: Tomada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Dose'
+        '409':
+          description: Já resolvida
+
+  /doses/{doseId}/skip:
+    post:
+      tags: [doses]
+      summary: Registrar dose como pulada
+      operationId: skipDose
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/doseId'
+      responses:
+        '200':
+          description: Pulada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Dose'
+        '409':
+          description: Já resolvida
+
+  /doses/{doseId}/snooze:
+    post:
+      tags: [doses]
+      summary: Adiar dose 10, 30 ou 60 minutos
+      operationId: snoozeDose
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/doseId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SnoozeRequest'
+      responses:
+        '200':
+          description: Adiada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Dose'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          description: Não pendente
+
+  /devices:
+    post:
+      tags: [devices]
+      summary: Registrar subscription Web Push (celular)
+      operationId: registerDevice
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeviceRegister'
+      responses:
+        '201':
+          description: Registrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Device'
+    get:
+      tags: [devices]
+      summary: Listar dispositivos do usuário
+      operationId: listDevices
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Lista
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Device'
+
+  /devices/{deviceId}:
+    delete:
+      tags: [devices]
+      summary: Remover dispositivo
+      operationId: deleteDevice
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: deviceId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Removido
+
+  /alerts/purchase:
+    get:
+      tags: [alerts]
+      summary: Alertas in-app de compra (sem push)
+      operationId: listPurchaseAlerts
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Medicamentos abaixo do limiar
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PurchaseAlert'
+
+  /admin/whitelist:
+    get:
+      tags: [admin]
+      summary: Listar whitelist (somente admin)
+      operationId: listWhitelist
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Lista
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/WhitelistEntry'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [admin]
+      summary: Adicionar e-mail à whitelist
+      operationId: addWhitelist
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WhitelistCreate'
+      responses:
+        '201':
+          description: Criado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WhitelistEntry'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/whitelist/{entryId}:
+    delete:
+      tags: [admin]
+      summary: Remover da whitelist
+      operationId: removeWhitelist
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: entryId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Removido
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    medicationId:
+      name: medicationId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    scheduleId:
+      name: scheduleId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    doseId:
+      name: doseId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  responses:
+    BadRequest:
+      description: Requisição inválida
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthorized:
+      description: Não autenticado
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: Fora da whitelist ou não admin
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Não encontrado
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+  schemas:
+    Error:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+        code:
+          type: string
+    UserProfile:
+      type: object
+      required: [email, admin, timezone]
+      properties:
+        email:
+          type: string
+          format: email
+        displayName:
+          type: string
+        admin:
+          type: boolean
+        timezone:
+          type: string
+          description: Fuso fixo do ambiente (ex. America/Sao_Paulo)
+    Medication:
+      type: object
+      required: [id, name, unit, quantityPerDose, stockQuantity, purchaseThresholdDoses, purchaseNeeded]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        unit:
+          type: string
+        quantityPerDose:
+          type: number
+        stockQuantity:
+          type: number
+        purchaseThresholdDoses:
+          type: integer
+        purchaseNeeded:
+          type: boolean
+    MedicationCreate:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        unit:
+          type: string
+        quantityPerDose:
+          type: number
+          exclusiveMinimum: 0
+        stockQuantity:
+          type: number
+          minimum: 0
+        purchaseThresholdDoses:
+          type: integer
+          minimum: 0
+    MedicationUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+        unit:
+          type: string
+        quantityPerDose:
+          type: number
+        stockQuantity:
+          type: number
+        purchaseThresholdDoses:
+          type: integer
+    ScheduleStatus:
+      type: string
+      enum: [ACTIVE, PAUSED, COMPLETED, CANCELLED]
+    Schedule:
+      type: object
+      required: [id, medicationId, status, daysOfWeek, timesOfDay, durationType, takenCount]
+      properties:
+        id:
+          type: string
+          format: uuid
+        medicationId:
+          type: string
+          format: uuid
+        status:
+          $ref: '#/components/schemas/ScheduleStatus'
+        daysOfWeek:
+          type: array
+          items:
+            type: integer
+            minimum: 1
+            maximum: 7
+          minItems: 1
+        timesOfDay:
+          type: array
+          items:
+            type: string
+            pattern: '^([01]\d|2[0-3]):[0-5]\d$'
+          minItems: 1
+        durationType:
+          type: string
+          enum: [INDEFINITE, FIXED_TAKEN_DOSES]
+        maxTakenDoses:
+          type: integer
+          nullable: true
+        takenCount:
+          type: integer
+    ScheduleCreate:
+      type: object
+      required: [medicationId, daysOfWeek, timesOfDay, durationType]
+      properties:
+        medicationId:
+          type: string
+          format: uuid
+        daysOfWeek:
+          type: array
+          items:
+            type: integer
+            minimum: 1
+            maximum: 7
+          minItems: 1
+        timesOfDay:
+          type: array
+          items:
+            type: string
+            pattern: '^([01]\d|2[0-3]):[0-5]\d$'
+          minItems: 1
+        durationType:
+          type: string
+          enum: [INDEFINITE, FIXED_TAKEN_DOSES]
+        maxTakenDoses:
+          type: integer
+          exclusiveMinimum: 0
+    ScheduleUpdate:
+      type: object
+      properties:
+        status:
+          $ref: '#/components/schemas/ScheduleStatus'
+        daysOfWeek:
+          type: array
+          items:
+            type: integer
+        timesOfDay:
+          type: array
+          items:
+            type: string
+        durationType:
+          type: string
+          enum: [INDEFINITE, FIXED_TAKEN_DOSES]
+        maxTakenDoses:
+          type: integer
+        resetTakenCount:
+          type: boolean
+          description: Ao reativar FIXED, zera takenCount se true
+    DoseStatus:
+      type: string
+      enum: [PENDING, TAKEN, SKIPPED]
+    Dose:
+      type: object
+      required: [id, scheduleId, medicationId, scheduledAt, status, snoozeCount]
+      properties:
+        id:
+          type: string
+          format: uuid
+        scheduleId:
+          type: string
+          format: uuid
+        medicationId:
+          type: string
+          format: uuid
+        scheduledAt:
+          type: string
+          format: date-time
+        originalScheduledAt:
+          type: string
+          format: date-time
+        status:
+          $ref: '#/components/schemas/DoseStatus'
+        snoozeCount:
+          type: integer
+        resolvedAt:
+          type: string
+          format: date-time
+          nullable: true
+    SnoozeRequest:
+      type: object
+      required: [minutes]
+      properties:
+        minutes:
+          type: integer
+          enum: [10, 30, 60]
+    DeviceRegister:
+      type: object
+      required: [endpoint, p256dh, auth, isMobile]
+      properties:
+        endpoint:
+          type: string
+          format: uri
+        p256dh:
+          type: string
+        auth:
+          type: string
+        isMobile:
+          type: boolean
+        userAgent:
+          type: string
+    Device:
+      type: object
+      required: [id, endpoint, isMobile]
+      properties:
+        id:
+          type: string
+          format: uuid
+        endpoint:
+          type: string
+        isMobile:
+          type: boolean
+        lastSeenAt:
+          type: string
+          format: date-time
+    PurchaseAlert:
+      type: object
+      required: [medicationId, name, stockQuantity, quantityPerDose, purchaseThresholdDoses, remainingDoses]
+      properties:
+        medicationId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        stockQuantity:
+          type: number
+        quantityPerDose:
+          type: number
+        purchaseThresholdDoses:
+          type: integer
+        remainingDoses:
+          type: number
+    WhitelistEntry:
+      type: object
+      required: [id, email, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        createdAt:
+          type: string
+          format: date-time
+    WhitelistCreate:
+      type: object
+      required: [email]
+      properties:
+        email:
+          type: string
+          format: email
