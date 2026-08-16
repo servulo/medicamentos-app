@@ -1,0 +1,258 @@
+# OpenAPI delta: med delete, dose on schedule, unit alerts
+
+**Feature**: `003-med-delete-dose-units`  
+**Base**: extends `specs/001-medication-control/contracts/openapi.yaml`  
+**Breaking**: Medication/Schedule/PurchaseAlert schemas change as below.
+
+```yaml
+openapi: 3.0.3
+info:
+  title: Medicamentos API — delta 003
+  version: 1.1.0
+paths:
+  /medications:
+    get:
+      summary: Listar apenas medicamentos ativos (deleted_at null)
+      operationId: listMedications
+    post:
+      summary: Criar medicamento (sem quantityPerDose)
+      operationId: createMedication
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MedicationCreate'
+
+  /medications/{medicationId}:
+    get:
+      summary: Obter medicamento ativo; 404 se soft-deleted ou de outro usuário
+      operationId: getMedication
+    patch:
+      summary: Atualizar nome/unit/estoque/limiar (inteiros); 404 se deleted
+      operationId: updateMedication
+    delete:
+      summary: Soft-delete — cancela agendas ACTIVE/PAUSED, skip doses PENDING
+      operationId: deleteMedication
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: medicationId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Excluído (soft-delete)
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found (outro usuário ou já excluído)
+
+  /schedules:
+    post:
+      summary: Criar agenda; exige medicamento ativo; quantityPerDose inteiro ≥1
+      operationId: createSchedule
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScheduleCreate'
+      responses:
+        '201':
+          description: Criado
+        '400':
+          description: Validação (quantityPerDose inválido, etc.)
+        '404':
+          description: Medicamento inexistente, de outro usuário ou excluído
+
+  /schedules/{scheduleId}:
+    patch:
+      summary: Atualizar agenda incluindo quantityPerDose
+      operationId: updateSchedule
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScheduleUpdate'
+
+  /alerts/purchase:
+    get:
+      summary: Alertas onde stockQuantity <= purchaseThresholdUnits (ativos)
+      operationId: listPurchaseAlerts
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PurchaseAlert'
+
+components:
+  schemas:
+    Medication:
+      type: object
+      required:
+        - id
+        - name
+        - unit
+        - stockQuantity
+        - purchaseThresholdUnits
+        - purchaseNeeded
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        unit:
+          type: string
+        stockQuantity:
+          type: integer
+          minimum: 0
+        purchaseThresholdUnits:
+          type: integer
+          minimum: 0
+          description: Default 10
+        purchaseNeeded:
+          type: boolean
+          description: stockQuantity <= purchaseThresholdUnits
+      description: Sem quantityPerDose. Soft-deleted não aparecem em list/get.
+
+    MedicationCreate:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        unit:
+          type: string
+        stockQuantity:
+          type: integer
+          minimum: 0
+        purchaseThresholdUnits:
+          type: integer
+          minimum: 0
+          default: 10
+
+    MedicationUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+        unit:
+          type: string
+        stockQuantity:
+          type: integer
+          minimum: 0
+        purchaseThresholdUnits:
+          type: integer
+          minimum: 0
+
+    Schedule:
+      type: object
+      required:
+        - id
+        - medicationId
+        - status
+        - daysOfWeek
+        - timesOfDay
+        - durationType
+        - takenCount
+        - quantityPerDose
+      properties:
+        quantityPerDose:
+          type: integer
+          minimum: 1
+          description: Unidades consumidas por tomada (desta agenda)
+
+    ScheduleCreate:
+      type: object
+      required: [medicationId, daysOfWeek, timesOfDay, durationType]
+      properties:
+        medicationId:
+          type: string
+          format: uuid
+        daysOfWeek:
+          type: array
+          items:
+            type: integer
+        timesOfDay:
+          type: array
+          items:
+            type: string
+        durationType:
+          type: string
+          enum: [INDEFINITE, FIXED_TAKEN_DOSES]
+        maxTakenDoses:
+          type: integer
+          nullable: true
+        quantityPerDose:
+          type: integer
+          minimum: 1
+          default: 1
+
+    ScheduleUpdate:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [ACTIVE, PAUSED, COMPLETED, CANCELLED]
+        daysOfWeek:
+          type: array
+          items:
+            type: integer
+        timesOfDay:
+          type: array
+          items:
+            type: string
+        durationType:
+          type: string
+        maxTakenDoses:
+          type: integer
+          nullable: true
+        resetTakenCount:
+          type: boolean
+        quantityPerDose:
+          type: integer
+          minimum: 1
+
+    PurchaseAlert:
+      type: object
+      required:
+        - medicationId
+        - name
+        - unit
+        - stockQuantity
+        - purchaseThresholdUnits
+      properties:
+        medicationId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        unit:
+          type: string
+        stockQuantity:
+          type: integer
+        purchaseThresholdUnits:
+          type: integer
+      description: Sem quantityPerDose / remainingDoses / purchaseThresholdDoses
+```
+
+## Behavioral notes (normative)
+
+- `DELETE /medications/{id}`: 204; idempotent 404 se já deleted; cascata:
+  ACTIVE/PAUSED→CANCELLED; **todas** PENDING do medicationId→SKIPPED (sem
+  baixar estoque). Ver [data-model.md](../data-model.md).
+- `POST /doses/{id}/take` (001): decrementa estoque pela `quantityPerDose` da
+  **agenda** da dose.
+- `PATCH /schedules/{id}` MUST aceitar `quantityPerDose` (edição FR-006).
+- Rejeitar payloads com número não inteiro para stock, threshold ou
+  quantityPerDose → 400; `stockQuantity`/`purchaseThresholdUnits` = 0 permitido.

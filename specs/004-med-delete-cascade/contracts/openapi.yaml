@@ -1,0 +1,76 @@
+# OpenAPI delta: hard-delete em cascata do medicamento
+
+**Feature**: `004-med-delete-cascade`  
+**Base**: `specs/001-medication-control/contracts/openapi.yaml` (semântica 003)  
+**Breaking**: `DELETE /medications/{medicationId}` deixa de ser soft-delete;
+agendas e histórico passam a ser removidos, não cancelados/pulados.
+
+```yaml
+openapi: 3.0.3
+info:
+  title: Medicamentos API — delta 004
+  version: 1.2.0
+paths:
+  /medications:
+    get:
+      summary: Listar medicamentos do usuário (não há estado excluído)
+      operationId: listMedications
+
+  /medications/{medicationId}:
+    get:
+      summary: Obter medicamento; 404 se inexistente ou de outro usuário
+      operationId: getMedication
+    patch:
+      summary: Atualizar nome/unit/estoque/limiar; 404 se inexistente
+      operationId: updateMedication
+    delete:
+      summary: Hard-delete — remove medicamento, todas as agendas e todo o histórico de doses
+      operationId: deleteMedication
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: medicationId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Removido em cascata (medicamento, agendas, doses e logs de notificação dessas doses)
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found (outro usuário, id inexistente ou já excluído)
+
+  /schedules/{scheduleId}:
+    get:
+      summary: 404 se a agenda foi apagada junto com o medicamento
+      operationId: getSchedule
+
+  /doses:
+    get:
+      summary: Não retorna ocorrências de medicamento já excluído
+      operationId: listDoses
+
+  /alerts/purchase:
+    get:
+      summary: Não inclui medicamento excluído (linha do catálogo inexistente)
+      operationId: listPurchaseAlerts
+```
+
+## Behavioral notes (normative)
+
+- `DELETE /medications/{id}`: **204** para o dono. Cascata transacional, nesta
+  ordem: `notification_log` das doses → `dose_occurrences` →
+  `treatment_schedules` → `medications`. Ver [data-model.md](../data-model.md).
+- Segundo `DELETE` do mesmo id → **404**.
+- `DELETE` de medicamento de outro usuário → **404** (sem alterar dados).
+- Após 204: `GET /medications/{id}` → 404; `GET /schedules/{id}` das agendas
+  daquele item → 404; `GET /doses` não lista doses daquele `medicationId`;
+  `POST /schedules` com aquele `medicationId` → 404.
+- Não há restore, lista de excluídos nem corpo na resposta 204.
+- Regras 003 de quantidade por dose e alerta por unidade permanecem para
+  medicamentos que ainda existem.
