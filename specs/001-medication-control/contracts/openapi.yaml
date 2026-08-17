@@ -122,6 +122,21 @@ paths:
                 $ref: '#/components/schemas/Medication'
         '404':
           $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [medications]
+      summary: Hard-delete — remove medicamento, todas as agendas e todo o histórico de doses
+      operationId: deleteMedication
+      security:
+        - bearerAuth: []
+      responses:
+        '204':
+          description: Removido em cascata (logs de notificação das doses, doses, agendas, medicamento). Segundo DELETE, GET do medicamento e GET das agendas daquele item passam a 404; doses e alertas daquele id deixam de aparecer.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Not found (outro usuário, id inexistente ou já excluído)
 
   /schedules:
     get:
@@ -520,7 +535,7 @@ components:
           description: Fuso fixo do ambiente (ex. America/Sao_Paulo)
     Medication:
       type: object
-      required: [id, name, unit, quantityPerDose, stockQuantity, purchaseThresholdDoses, purchaseNeeded]
+      required: [id, name, unit, stockQuantity, purchaseThresholdUnits, purchaseNeeded]
       properties:
         id:
           type: string
@@ -529,12 +544,12 @@ components:
           type: string
         unit:
           type: string
-        quantityPerDose:
-          type: number
         stockQuantity:
-          type: number
-        purchaseThresholdDoses:
           type: integer
+          minimum: 0
+        purchaseThresholdUnits:
+          type: integer
+          minimum: 0
         purchaseNeeded:
           type: boolean
     MedicationCreate:
@@ -547,15 +562,13 @@ components:
           maxLength: 120
         unit:
           type: string
-        quantityPerDose:
-          type: number
-          exclusiveMinimum: 0
         stockQuantity:
-          type: number
-          minimum: 0
-        purchaseThresholdDoses:
           type: integer
           minimum: 0
+        purchaseThresholdUnits:
+          type: integer
+          minimum: 0
+          default: 10
     MedicationUpdate:
       type: object
       properties:
@@ -563,18 +576,18 @@ components:
           type: string
         unit:
           type: string
-        quantityPerDose:
-          type: number
         stockQuantity:
-          type: number
-        purchaseThresholdDoses:
           type: integer
+          minimum: 0
+        purchaseThresholdUnits:
+          type: integer
+          minimum: 0
     ScheduleStatus:
       type: string
       enum: [ACTIVE, PAUSED, COMPLETED, CANCELLED]
     Schedule:
       type: object
-      required: [id, medicationId, status, daysOfWeek, timesOfDay, durationType, takenCount]
+      required: [id, medicationId, status, daysOfWeek, timesOfDay, durationType, takenCount, quantityPerDose]
       properties:
         id:
           type: string
@@ -605,6 +618,9 @@ components:
           nullable: true
         takenCount:
           type: integer
+        quantityPerDose:
+          type: integer
+          minimum: 1
     ScheduleCreate:
       type: object
       required: [medicationId, daysOfWeek, timesOfDay, durationType]
@@ -631,6 +647,10 @@ components:
         maxTakenDoses:
           type: integer
           exclusiveMinimum: 0
+        quantityPerDose:
+          type: integer
+          minimum: 1
+          default: 1
     ScheduleUpdate:
       type: object
       properties:
@@ -649,9 +669,13 @@ components:
           enum: [INDEFINITE, FIXED_TAKEN_DOSES]
         maxTakenDoses:
           type: integer
+          nullable: true
         resetTakenCount:
           type: boolean
           description: Ao reativar FIXED, zera takenCount se true
+        quantityPerDose:
+          type: integer
+          minimum: 1
     DoseStatus:
       type: string
       enum: [PENDING, TAKEN, SKIPPED]
@@ -668,6 +692,9 @@ components:
         medicationId:
           type: string
           format: uuid
+        medicationName:
+          type: string
+          description: Nome do medicamento
         scheduledAt:
           type: string
           format: date-time
@@ -720,21 +747,19 @@ components:
           format: date-time
     PurchaseAlert:
       type: object
-      required: [medicationId, name, stockQuantity, quantityPerDose, purchaseThresholdDoses, remainingDoses]
+      required: [medicationId, name, unit, stockQuantity, purchaseThresholdUnits]
       properties:
         medicationId:
           type: string
           format: uuid
         name:
           type: string
+        unit:
+          type: string
         stockQuantity:
-          type: number
-        quantityPerDose:
-          type: number
-        purchaseThresholdDoses:
           type: integer
-        remainingDoses:
-          type: number
+        purchaseThresholdUnits:
+          type: integer
     WhitelistEntry:
       type: object
       required: [id, email, createdAt]

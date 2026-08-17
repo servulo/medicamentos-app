@@ -1,0 +1,22 @@
+# Medicamentos App
+node_modules/
+dist/
+build/
+target/
+.angular/
+.idea/
+.vscode/
+*.iml
+*.class
+*.jar
+*.log
+.env
+.env.*
+!.env.example
+.DS_Store
+Thumbs.db
+*.tmp
+*.swp
+coverage/
+.quarkus/
+backend/.mvn/wrapper/maven-wrapper.jar
