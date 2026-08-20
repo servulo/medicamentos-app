@@ -1,7 +1,10 @@
 package app.medicamentos.schedule;
 
 import app.medicamentos.auth.CurrentUser;
+import app.medicamentos.dose.DoseOccurrenceEntity;
+import app.medicamentos.dose.DoseStatus;
 import app.medicamentos.medication.*;
+import app.medicamentos.notify.NotificationLogEntity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
@@ -46,14 +49,32 @@ public class ScheduleService {
     @Transactional
     public TreatmentScheduleEntity update(UUID id, ScheduleStatus status, List<Integer> days, List<String> times,
                                            DurationType duration, Integer max, Boolean reset, Integer quantityPerDose) {
-        TreatmentScheduleEntity s = get(id);
-        if (days != null || times != null || duration != null || max != null)
-            apply(s, days == null ? days(s) : days, times == null ? times(s) : times,
-                    duration == null ? s.durationType : duration,
-                    max == null && duration == null ? s.maxTakenDoses : max);
-        if (quantityPerDose != null) {
-            s.quantityPerDose = normalizeQuantityPerDose(quantityPerDose);
+        if (isStructuralUpdate(days, times, duration, max, quantityPerDose)) {
+            return updateFull(id, days, times, duration, max, quantityPerDose);
         }
+        return updateStatusOnly(id, status, reset);
+    }
+
+    @Transactional
+    public void delete(UUID id) {
+        TreatmentScheduleEntity s = get(id);
+        List<UUID> doseIds = DoseOccurrenceEntity.<DoseOccurrenceEntity>list(
+                "scheduleId = ?1 and userId = ?2", id, user.id())
+                .stream().map(d -> d.id).toList();
+        for (UUID doseId : doseIds) {
+            NotificationLogEntity.delete("doseId = ?1", doseId);
+        }
+        DoseOccurrenceEntity.delete("scheduleId = ?1 and userId = ?2", id, user.id());
+        s.delete();
+    }
+
+    static boolean isStructuralUpdate(List<Integer> days, List<String> times, DurationType duration,
+                                      Integer max, Integer quantityPerDose) {
+        return days != null || times != null || duration != null || max != null || quantityPerDose != null;
+    }
+
+    private TreatmentScheduleEntity updateStatusOnly(UUID id, ScheduleStatus status, Boolean reset) {
+        TreatmentScheduleEntity s = get(id);
         if (status != null) {
             if (status == ScheduleStatus.COMPLETED && s.durationType != DurationType.FIXED_TAKEN_DOSES)
                 throw MedicationService.error(400, "Only fixed schedules complete by dose limit");
@@ -64,6 +85,73 @@ public class ScheduleService {
         }
         s.updatedAt = OffsetDateTime.now();
         return s;
+    }
+
+    private TreatmentScheduleEntity updateFull(UUID id, List<Integer> days, List<String> times,
+                                                DurationType duration, Integer max, Integer quantityPerDose) {
+        TreatmentScheduleEntity s = get(id);
+        List<Integer> beforeDays = days(s);
+        List<String> beforeTimes = times(s);
+
+        DurationType newDuration = duration != null ? duration : s.durationType;
+        Integer newMax = max;
+        if (duration != null && duration == DurationType.INDEFINITE) {
+            newMax = null;
+        } else if (newMax == null && newDuration == DurationType.FIXED_TAKEN_DOSES) {
+            newMax = s.maxTakenDoses;
+        }
+
+        apply(s,
+                days != null ? days : beforeDays,
+                times != null ? times : beforeTimes,
+                newDuration,
+                newMax);
+
+        if (quantityPerDose != null) {
+            s.quantityPerDose = normalizeQuantityPerDose(quantityPerDose);
+        }
+
+        if (s.durationType == DurationType.FIXED_TAKEN_DOSES && s.maxTakenDoses < s.takenCount) {
+            throw MedicationService.error(400, "maxTakenDoses must be >= takenCount");
+        }
+
+        if (s.status == ScheduleStatus.PAUSED || s.status == ScheduleStatus.CANCELLED) {
+            s.status = ScheduleStatus.ACTIVE;
+        }
+
+        recalcStatusAfterFullEdit(s);
+
+        if (recurrenceChanged(beforeDays, beforeTimes, days(s), times(s))) {
+            purgePendingDoses(s.id);
+        }
+
+        s.updatedAt = OffsetDateTime.now();
+        return s;
+    }
+
+    static void recalcStatusAfterFullEdit(TreatmentScheduleEntity s) {
+        if (s.durationType == DurationType.FIXED_TAKEN_DOSES) {
+            s.status = s.takenCount >= s.maxTakenDoses ? ScheduleStatus.COMPLETED : ScheduleStatus.ACTIVE;
+        } else if (s.status == ScheduleStatus.COMPLETED) {
+            s.status = ScheduleStatus.ACTIVE;
+        }
+    }
+
+    static boolean recurrenceChanged(List<Integer> beforeDays, List<String> beforeTimes,
+                                     List<Integer> afterDays, List<String> afterTimes) {
+        return !new TreeSet<>(beforeDays).equals(new TreeSet<>(afterDays))
+                || !new TreeSet<>(beforeTimes).equals(new TreeSet<>(afterTimes));
+    }
+
+    private void purgePendingDoses(UUID scheduleId) {
+        List<UUID> pendingIds = DoseOccurrenceEntity.<DoseOccurrenceEntity>list(
+                "scheduleId = ?1 and userId = ?2 and status = ?3", scheduleId, user.id(), DoseStatus.PENDING)
+                .stream().map(d -> d.id).toList();
+        for (UUID doseId : pendingIds) {
+            NotificationLogEntity.delete("doseId = ?1", doseId);
+        }
+        DoseOccurrenceEntity.delete("scheduleId = ?1 and userId = ?2 and status = ?3",
+                scheduleId, user.id(), DoseStatus.PENDING);
     }
 
     static int normalizeQuantityPerDose(Integer quantityPerDose) {

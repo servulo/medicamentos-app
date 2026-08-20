@@ -16,11 +16,10 @@ const HOURLY_SLOTS: string[] = Array.from({ length: 24 }, (_, hour) =>
   <div class="grid">@for(s of items;track s.id){<article><div class="row"><h2>{{name(s.medicationId)}}</h2><span class="badge">{{status(s.status)}}</span></div>
   <p>{{days(s.daysOfWeek)}} às {{s.timesOfDay.join(', ')}}</p>
   <p>{{s.durationType==='INDEFINITE'?'Uso contínuo':s.takenCount+' de '+s.maxTakenDoses+' doses tomadas'}}</p>
-  <label class="inline">Unidades por dose
-    <input type="number" min="1" step="1" [value]="s.quantityPerDose" (change)="saveQuantity(s, $event)">
-  </label>
-  @if(s.status==='ACTIVE'){<button class="secondary" (click)="setStatus(s,'PAUSED')">Pausar</button>}
-  @if(s.status==='PAUSED'){<button (click)="setStatus(s,'ACTIVE')">Reativar</button>}</article>}</div>`
+  <p>Unidades por dose: {{s.quantityPerDose}}</p>
+  <a [routerLink]="['/agendas', s.id, 'editar']">Editar</a>
+  @if(s.status==='ACTIVE'){ · <button class="secondary" (click)="setStatus(s,'PAUSED')">Pausar</button>}
+  @if(s.status==='PAUSED'){ · <button (click)="setStatus(s,'ACTIVE')">Reativar</button>}</article>}</div>`
 })
 export class SchedulesPage implements OnInit {
   readonly api = inject(ApiService);
@@ -43,35 +42,26 @@ export class SchedulesPage implements OnInit {
   setStatus(s: Schedule, status: 'ACTIVE' | 'PAUSED') {
     this.api.updateSchedule(s.id, { status, resetTakenCount: false }).subscribe((v) => Object.assign(s, v));
   }
-  saveQuantity(s: Schedule, event: Event) {
-    const raw = Math.trunc(Number((event.target as HTMLInputElement).value));
-    if (!Number.isFinite(raw) || raw < 1) {
-      (event.target as HTMLInputElement).value = String(s.quantityPerDose);
-      return;
-    }
-    this.api.updateSchedule(s.id, { quantityPerDose: raw }).subscribe({
-      next: (v) => Object.assign(s, v),
-      error: () => {
-        (event.target as HTMLInputElement).value = String(s.quantityPerDose);
-      }
-    });
-  }
 }
 
 @Component({
   standalone: true,
   imports: [ReactiveFormsModule, RouterLink],
-  template: `<div class="page-title"><h1>Nova agenda</h1><a routerLink="/agendas">Voltar</a></div>
+  template: `<div class="page-title"><h1>{{editId?'Editar agenda':'Nova agenda'}}</h1><a routerLink="/agendas">Voltar</a></div>
   <form class="form-card" [formGroup]="form" (ngSubmit)="save()">
     <p class="info">Todos os horários seguem o fuso <strong>{{me.profile()?.timezone||'configurado no aplicativo'}}</strong>.</p>
-    <label>Medicamento
-      <select formControlName="medicationId">
-        <option value="">Selecione</option>
-        @for (m of meds; track m.id) {
-          <option [value]="m.id">{{m.name}}</option>
-        }
-      </select>
-    </label>
+    @if (editId) {
+      <p><strong>Medicamento:</strong> {{medicationName}}</p>
+    } @else {
+      <label>Medicamento
+        <select formControlName="medicationId">
+          <option value="">Selecione</option>
+          @for (m of meds; track m.id) {
+            <option [value]="m.id">{{m.name}}</option>
+          }
+        </select>
+      </label>
+    }
     <label>Unidades por dose
       <input type="number" min="1" step="1" formControlName="quantityPerDose">
     </label>
@@ -126,7 +116,12 @@ export class SchedulesPage implements OnInit {
     @if (error) {
       <p class="error">{{error}}</p>
     }
-    <button [disabled]="form.invalid">Criar agenda</button>
+    <div class="actions">
+      <button [disabled]="form.invalid">{{editId?'Salvar alterações':'Criar agenda'}}</button>
+      @if (editId) {
+        <button type="button" class="secondary" (click)="remove()">Excluir</button>
+      }
+    </div>
   </form>`
 })
 export class ScheduleFormPage implements OnInit {
@@ -137,6 +132,8 @@ export class ScheduleFormPage implements OnInit {
   readonly me = inject(MeService);
   readonly dayNames = dayNames;
   readonly hourlySlots = HOURLY_SLOTS;
+  editId = '';
+  medicationName = '';
   meds: Medication[] = [];
   selectedDays: number[] = [];
   selectedTimes: string[] = [];
@@ -152,8 +149,34 @@ export class ScheduleFormPage implements OnInit {
   });
 
   ngOnInit() {
-    this.api.medications().subscribe((v) => (this.meds = v));
-    this.form.patchValue({ medicationId: this.route.snapshot.queryParamMap.get('medicationId') || '' });
+    this.editId = this.route.snapshot.paramMap.get('id') || '';
+    this.api.medications().subscribe((v) => {
+      this.meds = v;
+      if (this.editId) {
+        this.loadSchedule();
+      } else {
+        this.form.patchValue({ medicationId: this.route.snapshot.queryParamMap.get('medicationId') || '' });
+      }
+    });
+  }
+
+  private loadSchedule() {
+    this.api.schedule(this.editId).subscribe({
+      next: (s) => {
+        this.medicationName = this.meds.find((m) => m.id === s.medicationId)?.name || 'Medicamento';
+        this.selectedDays = [...s.daysOfWeek].sort();
+        this.selectedTimes = [...s.timesOfDay].sort();
+        this.form.patchValue({
+          medicationId: s.medicationId,
+          quantityPerDose: s.quantityPerDose,
+          durationType: s.durationType,
+          maxTakenDoses: s.maxTakenDoses ?? 1
+        });
+        this.form.controls.medicationId.clearValidators();
+        this.form.controls.medicationId.updateValueAndValidity();
+      },
+      error: (e) => (this.error = e.message)
+    });
   }
 
   toggleDay(day: number) {
@@ -203,18 +226,28 @@ export class ScheduleFormPage implements OnInit {
       return;
     }
     const v = this.form.getRawValue();
-    this.api
-      .createSchedule({
-        medicationId: v.medicationId,
-        daysOfWeek: this.selectedDays,
-        timesOfDay: this.selectedTimes,
-        durationType: v.durationType,
-        maxTakenDoses: v.durationType === 'FIXED_TAKEN_DOSES' ? v.maxTakenDoses : undefined,
-        quantityPerDose: Math.trunc(v.quantityPerDose)
-      })
-      .subscribe({
-        next: () => void this.router.navigateByUrl('/agendas'),
-        error: (e) => (this.error = e.message)
-      });
+    const body = {
+      daysOfWeek: this.selectedDays,
+      timesOfDay: this.selectedTimes,
+      durationType: v.durationType,
+      maxTakenDoses: v.durationType === 'FIXED_TAKEN_DOSES' ? v.maxTakenDoses : undefined,
+      quantityPerDose: Math.trunc(v.quantityPerDose)
+    };
+    const request = this.editId
+      ? this.api.updateSchedule(this.editId, body)
+      : this.api.createSchedule({ ...body, medicationId: v.medicationId });
+    request.subscribe({
+      next: () => void this.router.navigateByUrl('/agendas'),
+      error: (e) => (this.error = e.message)
+    });
+  }
+
+  remove() {
+    if (!this.editId) return;
+    if (!confirm('Excluir esta agenda? A agenda e todo o histórico de doses serão apagados de forma permanente e não poderão ser recuperados.')) return;
+    this.api.deleteSchedule(this.editId).subscribe({
+      next: () => void this.router.navigateByUrl('/agendas'),
+      error: (e) => (this.error = e.message)
+    });
   }
 }

@@ -206,7 +206,12 @@ paths:
           $ref: '#/components/responses/NotFound'
     patch:
       tags: [schedules]
-      summary: Atualizar agenda ou transição de status
+      summary: Atualizar agenda — status rápido OU edição completa
+      description: |
+        **Status-only** (listagem): corpo com apenas `status` (+ opcional `resetTakenCount`).
+        **Edição completa** (formulário): inclui `daysOfWeek`, `timesOfDay`, `durationType`,
+        `maxTakenDoses` e/ou `quantityPerDose` — dispara recálculo de status e purga de
+        doses pendentes quando a recorrência muda. `medicationId` MUST NOT ser alterado.
       operationId: updateSchedule
       security:
         - bearerAuth: []
@@ -223,6 +228,21 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Schedule'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [schedules]
+      summary: Hard-delete — remove agenda e todo histórico de doses dela
+      operationId: deleteSchedule
+      security:
+        - bearerAuth: []
+      responses:
+        '204':
+          description: Agenda e doses removidas; medicamento e outras agendas intactos
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /doses:
     get:

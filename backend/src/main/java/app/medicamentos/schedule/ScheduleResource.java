@@ -35,6 +35,12 @@ public class ScheduleResource {
                 c.durationType, c.maxTakenDoses, c.resetTakenCount, c.quantityPerDose));
     }
 
+    @DELETE @Path("/{id}")
+    public Response delete(@PathParam("id") UUID id) {
+        service.delete(id);
+        return Response.noContent().build();
+    }
+
     public static class Change {
         public UUID medicationId;
         public ScheduleStatus status;

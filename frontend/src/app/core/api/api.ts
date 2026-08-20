@@ -54,8 +54,10 @@ export class ApiService {
   updateMedication(id: string, value: Partial<MedicationInput>) { return this.http.patch<Medication>(`${this.base}/medications/${id}`, value); }
   deleteMedication(id: string) { return this.http.delete<void>(`${this.base}/medications/${id}`); }
   schedules() { return this.http.get<Schedule[]>(`${this.base}/schedules`); }
+  schedule(id: string) { return this.http.get<Schedule>(`${this.base}/schedules/${id}`); }
   createSchedule(value: Partial<Schedule>) { return this.http.post<Schedule>(`${this.base}/schedules`, value); }
   updateSchedule(id: string, value: Partial<Schedule> & { resetTakenCount?: boolean }) { return this.http.patch<Schedule>(`${this.base}/schedules/${id}`, value); }
+  deleteSchedule(id: string) { return this.http.delete<void>(`${this.base}/schedules/${id}`); }
   doses(status?: Dose['status'], medicationId?: string) {
     let params = new HttpParams();
     if (status) params = params.set('status', status);

@@ -19,6 +19,7 @@ export const routes: Routes = [
       { path: 'medicamentos/:id/editar', component: MedicationFormPage },
       { path: 'agendas', component: SchedulesPage },
       { path: 'agendas/nova', component: ScheduleFormPage },
+      { path: 'agendas/:id/editar', component: ScheduleFormPage },
       { path: 'doses', component: DosesPage },
       { path: 'alertas', component: AlertsPage },
       { path: 'historico', component: AdherencePage },

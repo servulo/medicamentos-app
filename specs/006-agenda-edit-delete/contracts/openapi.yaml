@@ -1,0 +1,130 @@
+# OpenAPI delta: edição completa e exclusão de agenda
+
+**Feature**: `006-agenda-edit-delete`  
+**Base**: `specs/001-medication-control/contracts/openapi.yaml` (+ deltas 003, 004)  
+**Breaking**: Não — adiciona `DELETE /schedules/{scheduleId}`; estende semântica
+de `PATCH` quando corpo inclui campos estruturais.
+
+```yaml
+openapi: 3.0.3
+info:
+  title: Medicamentos API — delta 006
+  version: 1.3.0
+paths:
+  /schedules/{scheduleId}:
+    get:
+      summary: Obter agenda (404 se excluída ou de outro usuário)
+      operationId: getSchedule
+    patch:
+      summary: Atualizar agenda — status rápido OU edição completa
+      operationId: updateSchedule
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: scheduleId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScheduleUpdate006'
+      responses:
+        '200':
+          description: Atualizada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Schedule'
+        '400':
+          description: Validação (ex. maxTakenDoses < takenCount, dias/horários inválidos)
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found
+    delete:
+      summary: Hard-delete — remove agenda e todo histórico de doses dela
+      operationId: deleteSchedule
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: scheduleId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Agenda e doses removidas; medicamento e outras agendas intactos
+        '401':
+          description: Unauthorized
+        '403':
+          description: Forbidden
+        '404':
+          description: Not found (outro usuário, id inexistente ou já excluído)
+
+  /doses:
+    get:
+      summary: Não retorna doses de agenda excluída
+      operationId: listDoses
+
+components:
+  schemas:
+    ScheduleUpdate006:
+      allOf:
+        - $ref: '#/components/schemas/ScheduleUpdate'
+      description: |
+        **Status-only** (listagem): corpo com apenas `status` (+ opcional `resetTakenCount`).
+        **Edição completa** (formulário): inclui `daysOfWeek`, `timesOfDay`,
+        `durationType`, `maxTakenDoses` e/ou `quantityPerDose` — dispara FR-007/008.
+        `medicationId` MUST NOT ser alterado; ignorar se enviado.
+```
+
+## Behavioral notes (normative)
+
+### PATCH — edição completa
+
+Disparada quando o corpo inclui ≥1 campo estrutural
+(`daysOfWeek`, `timesOfDay`, `durationType`, `maxTakenDoses`,
+`quantityPerDose`).
+
+1. Validar dias (1–7), horários (≥1), duração, `quantityPerDose ≥ 1`.
+2. Se FIXED: `maxTakenDoses` obrigatório, positivo, e `≥ takenCount`; senão **400**.
+3. Se status era `PAUSED` ou `CANCELLED` → `ACTIVE` (FR-008b).
+4. Recalcular status (FR-008a): FIXED com `takenCount >= maxTakenDoses` →
+   `COMPLETED`; caso contrário `ACTIVE` para FIXED/INDEFINITE conforme regras.
+5. Se `daysOfWeek` ou `timesOfDay` mudaram (normalizado): apagar todas doses
+   `PENDING` da agenda (+ `notification_log`); manter TAKEN/SKIPPED.
+6. Retornar `Schedule` atualizado (**200**).
+
+Alteração só de `quantityPerDose` ou duração **sem** mudança de dias/horários:
+não purga pendentes; recalc status se aplicável.
+
+### PATCH — status-only
+
+Corpo com **somente** `status` (e opcional `resetTakenCount`):
+
+- Pausar/reativar na listagem; sem FR-008b automático.
+- Sem purga de pendentes.
+
+### DELETE
+
+- **204** para dono da agenda.
+- Cascata: `notification_log` → `dose_occurrences` (todas) → `treatment_schedules`.
+- Medicamento do catálogo permanece; outras agendas do mesmo item permanecem.
+- Estoque **não** revertido.
+- Segundo DELETE → **404**.
+- DELETE de agenda de outro usuário → **404**.
+
+### Regressão
+
+- `POST /schedules`, `GET /schedules`, regras 003 (quantity per dose, alerta
+  por unidade) e delete de medicamento (004) inalterados para itens não
+  afetados.

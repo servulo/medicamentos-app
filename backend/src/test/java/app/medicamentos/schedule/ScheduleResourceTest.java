@@ -18,4 +18,17 @@ class ScheduleResourceTest extends ApiTestBase {
         as(email).body(Map.of("status", "ACTIVE")).patch(API + "/schedules/" + id)
                 .then().statusCode(200).body("status", equalTo("ACTIVE")).body("takenCount", equalTo(0));
     }
+
+    @Test void statusOnlyPauseDoesNotReactivateOnItsOwn() {
+        String email = "schedule-status-only@example.com";
+        authorize(email);
+        String medicationId = medication(email, "Status Only", 10, 2);
+        String id = schedule(email, medicationId, "INDEFINITE", null);
+        as(email).body(Map.of("status", "PAUSED")).patch(API + "/schedules/" + id)
+                .then().statusCode(200).body("status", equalTo("PAUSED"));
+        as(email).body(Map.of("status", "PAUSED")).patch(API + "/schedules/" + id)
+                .then().statusCode(200).body("status", equalTo("PAUSED"));
+        as(email).body(Map.of("status", "ACTIVE", "resetTakenCount", false)).patch(API + "/schedules/" + id)
+                .then().statusCode(200).body("status", equalTo("ACTIVE"));
+    }
 }
