@@ -1,5 +1,8 @@
 # Deploy — Medicamentos App
 
+Publicação no **Ubuntu Server** com acesso externo via Cloudflare Tunnel:
+[ubuntu-cloudflare-tunnel.md](./ubuntu-cloudflare-tunnel.md).
+
 ## Compose
 
 ```bash
